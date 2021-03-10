@@ -2,18 +2,23 @@
 div
   div.row.py-2.class
     div.col-8.col-md-4
-      span(:style="{ marginLeft: (2 * depth) + 'em'}")
-        //| {{ _class.name.join(" ➤ ")}}
-      | #[span(v-if="depth > 0") ⮡] {{ _class.name.slice(depth).join(" ➤ ")}}
+      span(:style="{ marginLeft: (1.5 * depth) + 'em', cursor: _class.children.length > 0 ? 'pointer' : null}" @click="expanded = !expanded")
+        span(v-if="_class.children.length > 0" style="opacity: 0.8")
+          icon(:name="expanded ? 'regular/minus-square' : 'regular/plus-square'" scale="0.8")
+        span(v-else style="opacity: 0.6")
+          icon(name="circle" scale="0.4" style="margin-left: 1em; margin-right: 1.22em;")
+        | {{ _class.name.slice(depth).join(" ➤ ")}}
+        icon.ml-1(v-if="_class.data && _class.data.color" name="circle" :style="'color: ' + _class.data.color")
+        span.ml-1(v-if="_class.children.length > 0" style="opacity: 0.5") ({{totalChildren}})
+
     div.col-4.col-md-8
-      //span.d-none.d-sm-inline.d-md-none(:style="{ marginLeft: (2 * depth) + 'em'}")
       span.d-none.d-md-inline
         span(v-if="_class.rule.type === 'regex'") Rule ({{_class.rule.type}}): #[code {{_class.rule.regex}}]
         span(v-else, style="color: #888") No rule
       span.float-right
         b-btn.ml-1(size="sm", variant="outline-secondary", @click="showEditModal()" style="border: 0;" pill)
           icon(name="edit")
-        b-btn.ml-1(size="sm", variant="outline-success", @click="addSubclass(_class)" style="border: 0;" pill)
+        b-btn.ml-1(size="sm", variant="outline-success", @click="addSubclass(_class); expanded = true" style="border: 0;" pill)
           icon(name="plus")
   div
     div.pa-2(v-for="child in _class.children", style="background: rgba(0, 0, 0, 0);", v-show="expanded")
@@ -41,18 +46,39 @@ div
     hr
 
     div.my-1
+      b Color
+
+      b-form-checkbox(v-model="editing.inherit_color" switch)
+        | Inherit parent color
+      b-input-group.my-1(prepend="Color" v-if="!editing.inherit_color")
+        b-form-input(v-model="editing.color", placeholder="#FF0")
+        icon.mt-1.ml-2(name="circle" scale="1.8" :style="{'color': editing.color}")
+        b-btn.px-1(@click="randomColor()" style="border: 0" variant="outline-dark" title="Randomize")
+          icon(name="sync" scale="1.5")
+
+    //
+      div.my-1
+        b Productivity score
+        b-input-group.my-1(prepend="Points")
+          b-form-input(v-model="editing.productivity")
+
+    hr
+
+    div.my-1
       b-btn(variant="danger", @click="removeClass(_class); $refs.edit.hide()")
         icon(name="trash")
         | Remove category
 </template>
 
 <script>
-import 'vue-awesome/icons/plus-square';
-import 'vue-awesome/icons/minus-square';
+import 'vue-awesome/icons/regular/plus-square';
+import 'vue-awesome/icons/regular/minus-square';
+import 'vue-awesome/icons/circle';
 import 'vue-awesome/icons/caret-right';
 import 'vue-awesome/icons/trash';
 import 'vue-awesome/icons/plus';
 import 'vue-awesome/icons/edit';
+import 'vue-awesome/icons/sync';
 
 import _ from 'lodash';
 
@@ -65,14 +91,16 @@ export default {
       default: 0,
     },
   },
-  data: () => {
+  data: function () {
     return {
-      expanded: true,
+      expanded: this.depth < 1,
       editing: {
         id: 0, // FIXME: Use ID assigned to category in vuex store, in order for saves to be uniquely targeted
         name: null,
         rule: {},
         parent: [],
+        inherit_color: true,
+        color: null,
       },
     };
   },
@@ -90,6 +118,12 @@ export default {
         { value: 'regex', text: 'Regular Expression' },
         //{ value: 'glob', text: 'Glob pattern' },
       ];
+    },
+    totalChildren: function () {
+      function countChildren(node) {
+        return node.children.length + _.sum(_.map(node.children, countChildren));
+      }
+      return countChildren(this._class);
     },
   },
   methods: {
@@ -129,6 +163,7 @@ export default {
         id: this.editing.id,
         name: this.editing.parent.concat(this.editing.name),
         rule: this.editing.rule.type !== null ? this.editing.rule : { type: null },
+        data: { color: this.editing.inherit_color === true ? undefined : this.editing.color },
       };
       this.$store.commit('categories/updateClass', new_class);
 
@@ -138,13 +173,20 @@ export default {
       });
     },
     resetModal() {
+      const color = this._class.data ? this._class.data.color : undefined;
+      const inherit_color = !color;
       this.editing = {
         id: this._class.id,
         name: this._class.subname,
         rule: _.cloneDeep(this._class.rule),
+        color,
+        inherit_color,
         parent: this._class.parent ? this._class.parent : [],
       };
       //console.log(this.editing);
+    },
+    randomColor() {
+      this.editing.color = '#' + (0x1000000 + Math.random() * 0xffffff).toString(16).substr(1, 6);
     },
   },
 };

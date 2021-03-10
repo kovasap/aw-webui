@@ -2,7 +2,7 @@
 div#wrapper
   aw-header
 
-  div(:class="{'container': !fullContainer, 'container-fluid': fullContainer}")
+  div(:class="{'container': !fullContainer, 'container-fluid': fullContainer}").px-0.px-md-3
     div.aw-container.my-3.p-3
       error-boundary
         user-satisfaction-poll
@@ -22,7 +22,7 @@ div#wrapper
           | Twitter
 
     div(style="float: right; text-align: right;")
-      | Found a bug? #[a(href="https://github.com/ActivityWatch/activitywatch/issues/new") File an issue]
+      | Found a bug? #[a(href="https://github.com/ActivityWatch/activitywatch/issues/new/choose") File an issue]
       br
       | Need help? #[a(href="https://forum.activitywatch.net/c/support") Ask on the forum]
       br

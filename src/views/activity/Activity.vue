@@ -67,6 +67,14 @@ div
         b-form-group(label="Show/filter category" label-cols="5" label-cols-lg="4")
           b-form-select(v-model="filterCategory", :options="categories")
 
+    div.row
+      div.col-md-12
+        b-form-checkbox(v-model="filterAFK")
+          | Filter AFK
+      div.col-md-12
+        b-form-checkbox(v-model="includeAudible")
+          | Count audible browser tab as active
+
     aw-devonly
       b-btn(id="load-demo", @click="load_demo")
         | Load demo data
@@ -143,6 +151,8 @@ export default {
     return {
       today: get_today(),
       filterCategory: null,
+      includeAudible: true,
+      filterAFK: true,
       new_view: {},
     };
   },
@@ -161,9 +171,11 @@ export default {
     },
     categories: function () {
       const cats = this.$store.getters['categories/all_categories'];
-      const entries = cats.map(c => {
-        return { text: c.join(' > '), value: c };
-      });
+      const entries = cats
+        .map(c => {
+          return { text: c.join(' > '), value: c };
+        })
+        .sort((a, b) => a.text > b.text);
       return [
         { text: 'All', value: null },
         { text: 'Uncategorized', value: ['Uncategorized'] },
@@ -262,7 +274,8 @@ export default {
         timeperiod: this.timeperiod,
         host: this.host,
         force: force,
-        filterAFK: true,
+        filterAFK: this.filterAFK,
+        includeAudible: this.includeAudible,
         filterCategories: this.filterCategories,
       });
     },

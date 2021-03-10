@@ -9,22 +9,30 @@ function querystr_to_array(querystr: string): string[] {
     .map(l => l + ';');
 }
 
+function escape_doublequote(s: string) {
+  return s.replace(/"/g, '\\"');
+}
+
+interface Rule {
+  type: string;
+  regex?: string;
+}
+
 interface BaseQueryParams {
   include_audible?: boolean;
-  classes: Record<string, any>;
+  classes: [string[], Rule][];
   filter_classes: string[][];
+  bid_browsers?: string[];
 }
 
 interface DesktopQueryParams extends BaseQueryParams {
   bid_window: string;
   bid_afk: string;
   filter_afk: boolean;
-  bid_browsers?: string[];
 }
 
 interface AndroidQueryParams extends BaseQueryParams {
   bid_android: string;
-  bid_browsers?: string[];
 }
 
 function isDesktopParams(object: any): object is DesktopQueryParams {
@@ -41,40 +49,49 @@ function isAndroidParams(object: any): object is AndroidQueryParams {
 //  - Categorization (if classes specified)
 //  - Filters by category (if filter_classes set)
 // Puts it's results in `events` and `not_afk` (if not_afk available for platform).
-function canonicalEvents(params: DesktopQueryParams | AndroidQueryParams): string {
+export function canonicalEvents(params: DesktopQueryParams | AndroidQueryParams): string {
   // Needs escaping for regex patterns like '\w' to work (JSON.stringify adds extra unecessary escaping)
-  const classes_str = JSON.stringify(params.classes).replace('\\\\', '\\');
+  const classes_str = JSON.stringify(params.classes).replace(/\\\\/g, '\\');
   const cat_filter_str = JSON.stringify(params.filter_classes);
+
+  // For simplicity, we assume that bid_window and bid_android are exchangeable (note however it needs special treatment)
   const bid_window = isDesktopParams(params) ? params.bid_window : params.bid_android;
 
-  return `
-    events = flood(query_bucket("${bid_window}"));
-    ${
-      isDesktopParams(params)
-        ? `not_afk = flood(query_bucket("${params.bid_afk}"));
-           not_afk = filter_keyvals(not_afk, "status", ["not-afk"]);`
-        : ''
-    }
-    ${isAndroidParams(params) ? 'events = merge_events_by_keys(events, ["app"]);' : ''}
-
-    ${
-      isDesktopParams(params) && params.filter_afk
-        ? 'events = filter_period_intersect(events, not_afk);'
-        : ''
-    }
-    ${params.classes ? `events = categorize(events, ${classes_str});` : ''}
-    ${
-      params.filter_classes
-        ? `events = filter_keyvals(events, "$category", ${cat_filter_str});`
-        : ''
-    }
-  `;
+  return [
+    // Fetch window/app events
+    `events = flood(query_bucket("${bid_window}"));`,
+    // On Android, merge events to avoid overload of events
+    isAndroidParams(params) ? 'events = merge_events_by_keys(events, ["app"]);' : '',
+    // Fetch not-afk events
+    isDesktopParams(params)
+      ? `not_afk = flood(query_bucket("${params.bid_afk}"));
+         not_afk = filter_keyvals(not_afk, "status", ["not-afk"]);`
+      : '',
+    // Fetch browser events
+    params.bid_browsers
+      ? isDesktopParams(params) &&
+        browserEvents(params) +
+          // Include focused and audible browser events as indications of not-afk
+          (params.include_audible
+            ? `audible_events = filter_keyvals(browser_events, "audible", [true]);
+             not_afk = period_union(not_afk, audible_events);`
+            : '')
+      : '',
+    // Filter out window events when the user was afk
+    isDesktopParams(params) && params.filter_afk
+      ? 'events = filter_period_intersect(events, not_afk);'
+      : '',
+    // Categorize
+    params.classes ? `events = categorize(events, ${classes_str});` : '',
+    // Filter out selected categories
+    params.filter_classes ? `events = filter_keyvals(events, "$category", ${cat_filter_str});` : '',
+  ].join('\n');
 }
 
 const default_limit = 100; // Hardcoded limit per group
 
 export function appQuery(appbucket: string, classes, filterCategories: string[][]): string[] {
-  appbucket = appbucket.replace('"', '\\"');
+  appbucket = escape_doublequote(appbucket);
   const params: AndroidQueryParams = {
     bid_android: appbucket,
     classes: classes,
@@ -130,7 +147,10 @@ const browser_appnames = {
   ],
   opera: ['opera.exe', 'Opera'],
   brave: ['brave.exe'],
-  edge: ['msedge.exe'],
+  edge: [
+    'msedge.exe', // Windows
+    'Microsoft Edge', // macOS
+  ],
   vivaldi: ['Vivaldi-stable', 'Vivaldi-snapshot', 'vivaldi.exe'],
 };
 
@@ -159,7 +179,8 @@ function browserEvents(params: DesktopQueryParams): string {
        window_${browserName} = filter_keyvals(events, "app", ${browser_appnames_str});
        events_${browserName} = filter_period_intersect(events_${browserName}, window_${browserName});
        events_${browserName} = split_url_events(events_${browserName});
-       browser_events = sort_by_timestamp(concat(browser_events, events_${browserName}));`;
+       browser_events = concat(browser_events, events_${browserName});
+       browser_events = sort_by_timestamp(browser_events);`;
   });
   return code;
 }
@@ -170,12 +191,13 @@ export function fullDesktopQuery(
   afkbucket: string,
   filterAFK = true,
   classes,
-  filterCategories: string[][]
+  filterCategories: string[][],
+  include_audible: boolean
 ): string[] {
   // Escape `"`
-  browserbuckets = _.map(browserbuckets, b => b.replace('"', '\\"'));
-  windowbucket = windowbucket.replace('"', '\\"');
-  afkbucket = afkbucket.replace('"', '\\"');
+  browserbuckets = _.map(browserbuckets, escape_doublequote);
+  windowbucket = escape_doublequote(windowbucket);
+  afkbucket = escape_doublequote(afkbucket);
 
   // TODO: Get classes
   const params: DesktopQueryParams = {
@@ -185,6 +207,7 @@ export function fullDesktopQuery(
     classes: classes,
     filter_classes: filterCategories,
     filter_afk: filterAFK,
+    include_audible,
   };
 
   return querystr_to_array(
@@ -197,8 +220,8 @@ export function fullDesktopQuery(
     app_events  = limit_events(app_events, ${default_limit});
     title_events  = limit_events(title_events, ${default_limit});
     duration = sum_durations(events);
-
-    ${browserEvents(params)}
+    ` + // Browser events are retrieved in canonicalQuery
+      `
     browser_events = split_url_events(browser_events);
     browser_urls = merge_events_by_keys(browser_events, ["url"]);
     browser_urls = sort_by_duration(browser_urls);
@@ -228,7 +251,7 @@ export function fullDesktopQuery(
 export function editorActivityQuery(editorbuckets: string[]): string[] {
   let q = ['events = [];'];
   for (let editorbucket of editorbuckets) {
-    editorbucket = editorbucket.replace('"', '\\"');
+    editorbucket = escape_doublequote(editorbucket);
     q.push('events = concat(events, flood(query_bucket("' + editorbucket + '")));');
   }
   q = q.concat([
@@ -244,8 +267,17 @@ export function editorActivityQuery(editorbuckets: string[]): string[] {
   return q;
 }
 
+export function hourlyCategoryQuery(params: DesktopQueryParams) {
+  const q = `
+    ${canonicalEvents(params)}
+    cat_events   = sort_by_duration(merge_events_by_keys(events, ["$category"]));
+    RETURN = { "cat_events": cat_events };
+  `;
+  return querystr_to_array(q);
+}
+
 export function dailyActivityQuery(afkbucket: string): string[] {
-  afkbucket = afkbucket.replace('"', '\\"');
+  afkbucket = escape_doublequote(afkbucket);
   return [
     'afkbucket = "' + afkbucket + '";',
     'not_afk = flood(query_bucket(afkbucket));',
@@ -256,7 +288,7 @@ export function dailyActivityQuery(afkbucket: string): string[] {
 }
 
 export function dailyActivityQueryAndroid(androidbucket: string): string[] {
-  androidbucket = androidbucket.replace('"', '\\"');
+  androidbucket = escape_doublequote(androidbucket);
   return [`events = query_bucket("${androidbucket}");`, 'RETURN = sum_durations(events);'];
 }
 
@@ -264,6 +296,7 @@ export default {
   fullDesktopQuery,
   appQuery,
   dailyActivityQuery,
+  hourlyCategoryQuery,
   dailyActivityQueryAndroid,
   editorActivityQuery,
 };
