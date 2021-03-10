@@ -29,7 +29,7 @@ import Color from 'color';
 import { buildTooltip } from '../util/tooltip.js';
 import { getColorFromString, getTitleAttr } from '../util/color.js';
 
-import { Timeline } from 'vis-timeline/esnext';
+import { Timeline, Graph2d } from 'vis-timeline/esnext';
 import 'vis-timeline/styles/vis-timeline-graph2d.css';
 
 export default {
@@ -143,13 +143,72 @@ export default {
         this.timeline.setOptions(this.options);
         this.timeline.setWindow(start, end);
         this.timeline.setData({ groups: groups, items: items });
+        const graph_items = [];
+        items.forEach(item => {
+          graph_items.push({
+            x: parseInt(item.id),
+            y: item.group,
+          });
+        });
+        console.log(items);
+        console.log(graph_items);
+        this.graph.setItems(graph_items);
       }
     },
   },
   mounted() {
     this.$nextTick(() => {
       const el = this.$el.querySelector('#visualization');
+      this.graph = new Graph2d(el, [], []);
       this.timeline = new Timeline(el, [], [], this.options);
+      function onChangeGraph(range) {
+        if (!range.byUser) {
+          return;
+        }
+        this.timeline.setOptions({
+          start: range.start,
+          end: range.end,
+          height: '50%',
+        });
+      }
+      this.graph.on('rangechange', onChangeGraph);
+
+      function onChangeTimeline(range) {
+        if (!range.byUser) {
+          return;
+        }
+        this.graph.setOptions({
+          start: range.start,
+          end: range.end,
+          height: '50%',
+        });
+      }
+      this.timeline.on('rangechange', onChangeTimeline);
+
+      // // Vis same width label.
+      // function visLabelSameWidth() {
+      //   const ylabel_width = $('#visualization-bottom-row .vis-labelset .vis-label').width() + 'px';
+      //   //$('#visualization-top-row')[0].childNodes[0].childNodes[2].style.left = ylabel_width;
+
+      //   const w1 = $('#visualization-top-row .vis-content .vis-data-axis').width();
+      //   const w2 = $('#visualization-bottom-row .vis-labelset .vis-label').width();
+
+      //   // $('#visualization-top-row')[0].childNodes[0].childNodes[2].style.display = 'none';
+
+      //   if (w2 > w1) {
+      //     $('#visualization-top-row .vis-content')[1].style.width = ylabel_width;
+      //   }
+      //   else {
+      //     $('#visualization-bottom-row .vis-labelset .vis-label').width(w1 + 'px');
+      //   }
+      // }
+      // this.graph.on('_change', function() {
+      //   visLabelSameWidth();
+      // });
+
+      // $(window).resize(function(){
+      //   visLabelSameWidth();
+      // });
     });
   },
 };
