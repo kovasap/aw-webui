@@ -1,10 +1,11 @@
 <template lang="pug">
 div
-  div#visualization
+  div#graph.visualization
+  div#timeline.visualization
 </template>
 
 <style lang="scss">
-div#visualization {
+div.visualization {
   margin-top: 0.5em;
   margin-bottom: 0.5em;
 
@@ -18,6 +19,19 @@ div#visualization {
     .timeline-item {
       border-radius: 2px;
     }
+  }
+  .vis-label {
+    width: 200px;
+  }
+  .vis-panel.vis-left {
+    width: 200px;
+  }
+  /* https://github.com/visjs/vis-timeline/issues/218 */
+  .vis-panel.vis-background.vis-horizontal .vis-grid.vis-minor {
+    margin-left: 124px;
+  }
+  .vis-panel.vis-background.vis-horizontal .vis-grid.vis-major {
+    margin-left: 126px;
   }
 }
 </style>
@@ -89,6 +103,8 @@ export default {
         //console.log("I told you so!")
         return;
       }
+      console.log("buckets");
+      console.log(this.buckets);
 
       // Build groups
       const groups = _.map(this.buckets, (bucket, bidx) => {
@@ -141,12 +157,14 @@ export default {
         this.options.min = start;
         this.options.max = end;
         this.timeline.setOptions(this.options);
+        this.graph.setOptions(this.options);
         this.timeline.setWindow(start, end);
+        this.graph.setWindow(start, end);
         this.timeline.setData({ groups: groups, items: items });
         const graph_items = [];
         items.forEach(item => {
           graph_items.push({
-            x: parseInt(item.id),
+            x: item.start,
             y: item.group,
           });
         });
@@ -158,33 +176,35 @@ export default {
     },
   },
   mounted() {
-    this.$nextTick(() => {
-      const el = this.$el.querySelector('#visualization');
-      this.graph = new Graph2d(el, [], []);
-      this.timeline = new Timeline(el, [], [], this.options);
+    this.$nextTick(function () {
+      const graph = new Graph2d(this.$el.querySelector('#graph'), [], []);
+      const timeline = new Timeline(this.$el.querySelector('#timeline'), [], [], this.options);
       function onChangeGraph(range) {
         if (!range.byUser) {
           return;
         }
-        this.timeline.setOptions({
+        timeline.setOptions({
           start: range.start,
           end: range.end,
-          height: '50%',
         });
       }
-      this.graph.on('rangechange', onChangeGraph);
+      graph.on('rangechange', onChangeGraph);
 
       function onChangeTimeline(range) {
         if (!range.byUser) {
           return;
         }
-        this.graph.setOptions({
+        graph.setOptions({
           start: range.start,
           end: range.end,
-          height: '50%',
         });
       }
-      this.timeline.on('rangechange', onChangeTimeline);
+      timeline.on('rangechange', onChangeTimeline);
+
+      // Need to bind to "this" on separate lines so that we can use the
+      // graph/timeline consts for closures in the onChange functions.
+      this.graph = graph;
+      this.timeline = timeline;
 
       // // Vis same width label.
       // function visLabelSameWidth() {
