@@ -161,12 +161,21 @@ export default {
         this.timeline.setWindow(start, end);
         this.graph.setWindow(start, end);
         this.timeline.setData({ groups: groups, items: items });
-        const graph_items = [];
-        items.forEach(item => {
-          graph_items.push({
-            x: item.start,
-            y: item.group,
-          });
+        const bin_width = 30; // seconds
+        let cur_bin_start = moment(items[0].start);
+        const graph_items = [{x: cur_bin_start, y: 0}];
+        items.slice(1).forEach(item => {
+          const cur_bin_end = cur_bin_start.clone().add(bin_width, 'second');
+          if (item.start > cur_bin_end) {
+            graph_items.push({
+              x: cur_bin_start,
+              y: 0,
+            });
+            console.log(cur_bin_start);
+            console.log(cur_bin_end);
+            cur_bin_start = cur_bin_end;
+          }
+          graph_items.slice(-1)[0].y += 1;
         });
         console.log(items);
         console.log(graph_items);
@@ -177,7 +186,7 @@ export default {
   },
   mounted() {
     this.$nextTick(function () {
-      const graph = new Graph2d(this.$el.querySelector('#graph'), [], []);
+      const graph = new Graph2d(this.$el.querySelector('#graph'), [], [], {drawPoints: false});
       const timeline = new Timeline(this.$el.querySelector('#timeline'), [], [], this.options);
       function onChangeGraph(range) {
         if (!range.byUser) {
