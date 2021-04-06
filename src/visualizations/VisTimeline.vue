@@ -46,6 +46,28 @@ import { getColorFromString, getTitleAttr } from '../util/color';
 import { Timeline, Graph2d } from 'vis-timeline/esnext';
 import 'vis-timeline/styles/vis-timeline-graph2d.css';
 
+function makeHistogramItems(items, group_id, bin_width_secs = 30) {
+  let cur_bin_start = moment(items[0].start);
+  const graph_items = [{ x: cur_bin_start, y: 1, group: group_id }];
+  // Skip the first item, since we start with 1 graph_item.
+  items.slice(1).forEach(item => {
+    if (item.group != group_id) {
+      throw new Error('Items must all have the same group!');
+    }
+    const cur_bin_end = cur_bin_start.clone().add(bin_width_secs, 'second');
+    if (item.start > cur_bin_end) {
+      graph_items.push({
+        x: cur_bin_start,
+        y: 0,
+        group: group_id,
+      });
+      cur_bin_start = cur_bin_end;
+    }
+    graph_items.slice(-1)[0].y += 1;
+  });
+  return graph_items;
+}
+
 export default {
   props: {
     buckets: { type: Array },
@@ -103,7 +125,7 @@ export default {
         //console.log("I told you so!")
         return;
       }
-      console.log("buckets");
+      console.log('buckets');
       console.log(this.buckets);
 
       // Build groups
@@ -161,32 +183,38 @@ export default {
         this.timeline.setWindow(start, end);
         this.graph.setWindow(start, end);
         this.timeline.setData({ groups: groups, items: items });
-        const bin_width = 30; // seconds
-        let cur_bin_start = moment(items[0].start);
-        const graph_items = [{x: cur_bin_start, y: 0}];
-        items.slice(1).forEach(item => {
-          const cur_bin_end = cur_bin_start.clone().add(bin_width, 'second');
-          if (item.start > cur_bin_end) {
-            graph_items.push({
-              x: cur_bin_start,
-              y: 0,
-            });
-            console.log(cur_bin_start);
-            console.log(cur_bin_end);
-            cur_bin_start = cur_bin_end;
+        const all_graph_items = [];
+        // Bug in the graph2d code means the id must be a string for the legend
+        // to be rendered:
+        // https://github.com/visjs/vis-timeline/issues/463
+        const graph_groups = groups.map(group => ({
+          id: group.id.toString(),
+          content: group.content,
+        }));
+        graph_groups.forEach(group => {
+          const group_items = items.filter(item => item.group == group.id);
+          if (group_items.length == 0) {
+            return;
           }
-          graph_items.slice(-1)[0].y += 1;
+          const graph_items = makeHistogramItems(group_items, group.id);
+          // Note this this might fail if graph_items is large.
+          // https://stackoverflow.com/questions/1374126/how-to-extend-an-existing-javascript-array-with-another-array-without-creating
+          all_graph_items.push(...graph_items);
         });
         console.log(items);
-        console.log(graph_items);
-        // https://ww3.arb.ca.gov/ei/tools/lib/vis/docs/graph2d.html#items
-        this.graph.setItems(graph_items);
+        console.log(all_graph_items);
+        console.log(graph_groups);
+        this.graph.setItems(all_graph_items);
+        this.graph.setGroups(graph_groups);
       }
     },
   },
   mounted() {
     this.$nextTick(function () {
-      const graph = new Graph2d(this.$el.querySelector('#graph'), [], [], {drawPoints: false});
+      const graph = new Graph2d(this.$el.querySelector('#graph'), [], [], {
+        drawPoints: false,
+        legend: true,
+      });
       const timeline = new Timeline(this.$el.querySelector('#timeline'), [], [], this.options);
       function onChangeGraph(range) {
         if (!range.byUser) {
